@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Scroll Demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #csvResultsTable {
+            max-height: 400px;
+            overflow-y: auto;
+            position: relative;
+            border: 1px solid #ddd;
+        }
+        #virtual-scroll-container {
+            position: relative;
+            width: 100%;
+        }
+        .virtual-row {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #ddd;
+            padding: 0 10px;
+            box-sizing: border-box;
+            background: #fff;
+            position: absolute;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Prediction System - Virtual Scroll</h1>
+        <form id="csvForm" class="mt-4">
+            <div class="mb-3">
+                <label for="csvFile" class="form-label">Upload CSV File</label>
+                <input type="file" id="csvFile" class="form-control" accept=".csv" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Make Predictions</button>
+        </form>
+        <div id="csvResults" class="mt-4">
+            <h3>Results:</h3>
+            <div id="csvResultsTable">
+                <div id="virtual-scroll-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const csvForm = document.getElementById("csvForm");
+        const csvResultsTable = document.getElementById("csvResultsTable");
+        const virtualScrollContainer = document.getElementById("virtual-scroll-container");
+
+        // Virtual Scroll Variables
+        let allRows = [];
+        let rowHeight = 40;
+        let visibleRowCount = 10;
+        let totalRowCount = 0;
+
+        // Class labels
+        const classLabels = ['Analysis', 'Backdoor', 'DoS', 'Exploits', 'Fuzzers', 'Generic', 'Normal',
+                             'Reconnaissance', 'Shellcode', 'Worms'];
+
+        // Virtual Scroll Function
+        function renderVirtualScroll(scrollTop) {
+            const startIndex = Math.floor(scrollTop / rowHeight);
+            const endIndex = Math.min(startIndex + visibleRowCount, totalRowCount);
+
+            virtualScrollContainer.style.height = `${totalRowCount * rowHeight}px`;
+
+            virtualScrollContainer.innerHTML = "";
+            for (let i = startIndex; i < endIndex; i++) {
+                const row = allRows[i];
+                const div = document.createElement("div");
+                div.classList.add("virtual-row");
+                div.style.top = `${i * rowHeight}px`;
+                div.innerHTML = `
+                    <div style="flex: 1;">Row ${i + 1}</div>
+                    <div style="flex: 2;">${JSON.stringify(row.probabilities)}</div>
+                    <div style="flex: 1;">${classLabels[row.prediction]}</div>
+                `;
+                virtualScrollContainer.appendChild(div);
+            }
+        }
+
+        csvResultsTable.addEventListener("scroll", (e) => {
+            const scrollTop = e.target.scrollTop;
+            renderVirtualScroll(scrollTop);
+        });
+
+        csvForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const csvFile = document.getElementById("csvFile").files[0];
+            const reader = new FileReader();
+
+            reader.onload = async () => {
+                const rows = reader.result.split("\n").map((row) => row.split(","));
+                const headers = [
+                    "id", "dur", "proto", "service", "state", "spkts", "dpkts", "sbytes", "dbytes", "rate", 
+                    "sttl", "dttl", "sload", "dload", "sloss", "dloss", "sinpkt", "dinpkt", "sjit", "djit", 
+                    "swin", "stcpb", "dtcpb", "dwin", "tcprtt", "synack", "ackdat", "smean", "dmean", 
+                    "trans_depth", "response_body_len", "ct_srv_src", "ct_state_ttl", "ct_dst_ltm", 
+                    "ct_src_dport_ltm", "ct_dst_sport_ltm", "ct_dst_src_ltm", "is_ftp_login", "ct_ftp_cmd", 
+                    "ct_flw_http_mthd", "ct_src_ltm", "ct_srv_dst", "is_sm_ips_ports", "attack_cat", "label"
+                ];
+                const dataRows = rows.slice(1).filter(row => row.length === headers.length);
+
+                allRows = [];
+                totalRowCount = dataRows.length;
+
+                for (let i = 0; i < dataRows.length; i++) {
+                    const row = dataRows[i];
+                    const data = headers.reduce((acc, header, index) => {
+                        acc[header] = isNaN(row[index]) ? row[index] : parseFloat(row[index]);
+                        return acc;
+                    }, {});
+
+                    try {
+                        const response = await fetch("http://127.0.0.1:8000/predict", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(data),
+                        });
+
+                        if (!response.ok) throw new Error("API request failed.");
+                        const result = await response.json();
+                        const prediction = result.probabilities;
+
+                        allRows.push({
+                            probabilities: prediction,
+                            prediction: prediction.indexOf(Math.max(...prediction))
+                        });
+
+                        if (i < visibleRowCount) renderVirtualScroll(0);
+                    } catch (error) {
+                        console.error("Error:", error.message);
+                    }
+                }
+            };
+
+            reader.readAsText(csvFile);
+        });
+
+    </script>
+</body>
+</html>
